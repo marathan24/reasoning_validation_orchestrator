@@ -4,6 +4,7 @@ import json
 import asyncio
 import traceback
 import uuid
+import re
 from dotenv import load_dotenv
 
 from naptha_sdk.modules.agent import Agent
@@ -69,6 +70,16 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Agent deployment details: {self.agent_deployments[1]}")
             raise
 
+    def sanitize_thought(self, thought):
+        # Ensure latex backslashes are properly escaped for JSON
+        thought = re.sub(r'\\([()]|frac|times|cdot)', r'\\\\\\1', thought)
+        
+        thought = re.sub(r'\\(\[|\])', r'\\\\\\1', thought)
+        
+        thought = thought.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
+        
+        return thought
+
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
         run_id = str(uuid.uuid4())
         private_key = get_private_key_from_pem(os.getenv("PRIVATE_KEY_FULL_PATH"))
@@ -95,7 +106,7 @@ class ReasoningValidationOrchestrator:
                 try:
                     reasoning_data = json.loads(reasoning_result.results[0])
                     thoughts = reasoning_data.get('thoughts', [])
-                    logger.info(f"Successfully extracted thoughts from reasoning_result.results[0]")
+                    logger.info(f"Successfully extracted {len(thoughts)} thoughts from reasoning_result")
                 except (json.JSONDecodeError, IndexError, TypeError) as e:
                     logger.error(f"Failed to extract thoughts from results: {e}")
                     logger.error(f"Results: {reasoning_result.results}")
@@ -109,10 +120,27 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
+        sanitized_thoughts = []
+        for thought in thoughts:
+            try:
+                sanitized_thought = self.sanitize_thought(thought)
+                sanitized_thoughts.append(sanitized_thought)
+            except Exception as e:
+                logger.error(f"Error sanitizing thought: {e}")
+                sanitized_thoughts.append(thought.replace('\\', '\\\\'))
+
+        try:
+            thoughts_json = json.dumps(sanitized_thoughts)
+            test_parse = json.loads(thoughts_json)
+            logger.info("Successfully validated thought JSON serialization")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to serialize thoughts to JSON: {e}")
+            sanitized_thoughts = [t.replace('\\', '\\\\\\\\') for t in thoughts]
+
         validation_input = {
             "func_name": "validate",
             "problem": module_run.inputs.problem,
-            "thoughts": thoughts
+            "thoughts": sanitized_thoughts
         }
 
         validation_run_input = AgentRunInput(
@@ -133,7 +161,7 @@ class ReasoningValidationOrchestrator:
                         validation_data = json.loads(validation_result.results[0])
                     elif isinstance(validation_result.results[0], dict):
                         validation_data = validation_result.results[0]
-                    logger.info(f"Successfully extracted validation data from validation_result.results[0]")
+                    logger.info(f"Successfully extracted validation data")
                 except (json.JSONDecodeError, IndexError, TypeError) as e:
                     logger.error(f"Failed to extract data from validation results: {e}")
                     logger.error(f"Results: {validation_result.results}")
