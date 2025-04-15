@@ -71,12 +71,11 @@ class ReasoningValidationOrchestrator:
             raise
 
     def sanitize_thought(self, thought):
-        # Ensure latex backslashes are properly escaped for JSON
-        thought = re.sub(r'\\([()]|frac|times|cdot)', r'\\\\\\1', thought)
+        thought = re.sub(r'\\[\(\)\[\]]', '', thought)
+        thought = re.sub(r'\\(frac|times|cdot|S_n)', '', thought)
+        thought = re.sub(r'\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', thought)
         
-        thought = re.sub(r'\\(\[|\])', r'\\\\\\1', thought)
-        
-        thought = thought.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
+        thought = thought.replace('\\n', '\n')
         
         return thought
 
@@ -120,27 +119,15 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
-        sanitized_thoughts = []
+        simplified_thoughts = []
         for thought in thoughts:
-            try:
-                sanitized_thought = self.sanitize_thought(thought)
-                sanitized_thoughts.append(sanitized_thought)
-            except Exception as e:
-                logger.error(f"Error sanitizing thought: {e}")
-                sanitized_thoughts.append(thought.replace('\\', '\\\\'))
-
-        try:
-            thoughts_json = json.dumps(sanitized_thoughts)
-            test_parse = json.loads(thoughts_json)
-            logger.info("Successfully validated thought JSON serialization")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to serialize thoughts to JSON: {e}")
-            sanitized_thoughts = [t.replace('\\', '\\\\\\\\') for t in thoughts]
+            plain_thought = self.sanitize_thought(thought)
+            simplified_thoughts.append(plain_thought)
 
         validation_input = {
             "func_name": "validate",
             "problem": module_run.inputs.problem,
-            "thoughts": sanitized_thoughts
+            "thoughts": simplified_thoughts
         }
 
         validation_run_input = AgentRunInput(
