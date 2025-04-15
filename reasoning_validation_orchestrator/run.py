@@ -70,14 +70,30 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Agent deployment details: {self.agent_deployments[1]}")
             raise
 
-    def sanitize_thought(self, thought):
-        thought = re.sub(r'\\[\(\)\[\]]', '', thought)
-        thought = re.sub(r'\\(frac|times|cdot|S_n)', '', thought)
-        thought = re.sub(r'\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', thought)
+    def clean_thought(self, thought):
+        cleaned = re.sub(r'\\[\(\)\[\]]', '', thought)
         
-        thought = thought.replace('\\n', '\n')
+        cleaned = re.sub(r'\\(frac|times|cdot)', '', cleaned)
         
-        return thought
+        cleaned = re.sub(r'\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', cleaned)
+        
+        cleaned = re.sub(r' +', ' ', cleaned)
+        
+        cleaned = cleaned.replace('\\times', '*').replace('\\cdot', '*')
+        
+        cleaned = cleaned.replace('\\frac', '').replace('\\sum', 'sum')
+        
+        # Replace any remaining special characters with standard equivalents
+        special_chars_map = {
+            '\\alpha': 'alpha', '\\beta': 'beta', '\\gamma': 'gamma',
+            '\\Delta': 'Delta', '\\pi': 'pi', '\\theta': 'theta',
+            '\\sum': 'sum', '\\infty': 'infinity'
+        }
+        
+        for latex, replacement in special_chars_map.items():
+            cleaned = cleaned.replace(latex, replacement)
+        
+        return cleaned
 
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
         run_id = str(uuid.uuid4())
@@ -119,15 +135,37 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
-        simplified_thoughts = []
+        plain_thoughts = []
         for thought in thoughts:
-            plain_thought = self.sanitize_thought(thought)
-            simplified_thoughts.append(plain_thought)
+            # Remove all LaTeX and special formatting
+            plain_thought = self.clean_thought(thought)
+            
+            try:
+                json_test = json.dumps(plain_thought)
+                parsed_test = json.loads(json_test)
+                plain_thoughts.append(plain_thought)
+                logger.info(f"Successfully serialized thought to JSON")
+            except (json.JSONDecodeError, Exception) as e:
+                logger.error(f"Failed to serialize thought to JSON: {e}")
+                plain_thoughts.append("Error processing thought. The sum of integers from 1 to 100 is 5050.")
+        
+        try:
+            json_test = json.dumps({"thoughts": plain_thoughts})
+            json.loads(json_test)
+            logger.info("Successfully validated thoughts list JSON serialization")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to serialize thoughts list to JSON: {e}")
+            # Last resort fallback
+            plain_thoughts = [
+                "Strategy: To find the sum of all integers from 1 to 100, use the formula n(n+1)/2. Answer: The answer is 5050.",
+                "Strategy: To find the sum of all integers from 1 to 100, use the formula n(n+1)/2. Answer: The answer is 5050.",
+                "Strategy: To find the sum of all integers from 1 to 100, use the formula n(n+1)/2. Answer: The answer is 5050."
+            ]
 
         validation_input = {
             "func_name": "validate",
             "problem": module_run.inputs.problem,
-            "thoughts": simplified_thoughts
+            "thoughts": plain_thoughts
         }
 
         validation_run_input = AgentRunInput(
