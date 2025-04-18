@@ -70,17 +70,14 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Agent deployment details: {self.agent_deployments[1]}")
             raise
 
-    def sanitize_problem(self, problem):
-        problem = problem.rstrip(',')
-        return json.dumps(problem)[1:-1]
-
-    def sanitize_thought(self, thought):
-        thought = re.sub(r'\\[\(\)\[\]]', '', thought)
-        thought = re.sub(r'\\(frac|times|cdot|S_n)', '', thought)
-        thought = re.sub(r'\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', thought)
+    def sanitize_text(self, text):
+        """Clean up text to prevent any JSON parsing issues"""
+        # Remove trailing commas and specific problematic patterns
+        text = text.rstrip(',')
+        # Replace any apostrophes and quotes with simple versions
+        text = text.replace("'", "'").replace('"', '"')
+        return text
         
-        return json.dumps(thought)[1:-1]
-
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
         run_id = str(uuid.uuid4())
         private_key_path = os.getenv("PRIVATE_KEY_FULL_PATH")
@@ -132,73 +129,66 @@ class ReasoningValidationOrchestrator:
                  logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
-        simplified_thoughts = []
+        sanitized_thoughts = []
         for thought in thoughts:
-            plain_thought = self.sanitize_thought(thought)
-            simplified_thoughts.append(plain_thought)
+            sanitized_thought = self.sanitize_text(thought)
+            sanitized_thoughts.append(sanitized_thought)
 
+        sanitized_problem = self.sanitize_text(module_run.inputs.problem)
+
+      
         validation_input = {
             "func_name": "validate",
-            "problem": self.sanitize_problem(module_run.inputs.problem),
-            "thoughts": simplified_thoughts
+            "problem": sanitized_problem,
+            "thoughts": sanitized_thoughts
         }
 
         try:
-            json_str = json.dumps(validation_input)
-            logger.debug(f"Validation input JSON: {json_str[:200]}...")
-            logger.debug("Validation input serializes properly to JSON")
-        except Exception as e:
-            logger.error(f"JSON serialization error: {e}")
-            logger.error(f"Problem text: {module_run.inputs.problem}")
-            raise ValueError(f"Failed to prepare validation input: {e}")
-
-        validation_run_input = AgentRunInput(
-            consumer_id=module_run.consumer_id,
-            inputs=validation_input,
-            deployment=self.agent_deployments[1],
-            signature=sign_consumer_id(module_run.consumer_id, private_key)
-        )
-
-        try:
+            validation_run_input = AgentRunInput(
+                consumer_id=module_run.consumer_id,
+                inputs=validation_input,
+                deployment=self.agent_deployments[1],
+                signature=sign_consumer_id(module_run.consumer_id, private_key)
+            )
+            
             validation_result = await self.validation_agent.run(validation_run_input)
-
-            validation_data = {}
-
-            if hasattr(validation_result, 'results') and validation_result.results:
-                try:
-                    if isinstance(validation_result.results[0], str):
-                        validation_data = json.loads(validation_result.results[0])
-                    elif isinstance(validation_result.results[0], dict):
-                        validation_data = validation_result.results[0]
-                    logger.info(f"Successfully extracted validation data")
-                except (json.JSONDecodeError, IndexError, TypeError) as e:
-                    logger.error(f"Failed to extract data from validation results: {e}")
-                    logger.error(f"Results: {validation_result.results}")
-            elif validation_result.status == 'error':
-                 logger.error(f"Validation agent run failed: {validation_result.error_message}")
-                 raise RuntimeError(f"Validation agent failed: {validation_result.error_message}")
-            else:
-                logger.warning(f"validation_result does not have expected structure or is empty: {validation_result}")
-
-            best_thought_idx = validation_data.get('best_thought_index', 0)
-            final_answer = validation_data.get('final_answer', '')
-
-            best_thought = ""
-            if thoughts and 0 <= best_thought_idx < len(thoughts):
-                 best_thought = thoughts[best_thought_idx]
-            elif thoughts:
-                 logger.warning(f"Best thought index {best_thought_idx} invalid for {len(thoughts)} thoughts. Using index 0.")
-                 best_thought = thoughts[0]
-            else:
-                 logger.warning("No thoughts available to determine best thought.")
-
-            logger.info(f"Validation completed, selected best thought index: {best_thought_idx}")
-
+            
         except Exception as e:
             logger.error(f"Error in validation step: {e}")
-            if not isinstance(e, RuntimeError):
-                 logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
-            raise e
+            logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
+            raise RuntimeError(f"Validation agent failed: {str(e)}")
+
+        validation_data = {}
+
+        if hasattr(validation_result, 'results') and validation_result.results:
+            try:
+                if isinstance(validation_result.results[0], str):
+                    validation_data = json.loads(validation_result.results[0])
+                elif isinstance(validation_result.results[0], dict):
+                    validation_data = validation_result.results[0]
+                logger.info(f"Successfully extracted validation data")
+            except (json.JSONDecodeError, IndexError, TypeError) as e:
+                logger.error(f"Failed to extract data from validation results: {e}")
+                logger.error(f"Results: {validation_result.results}")
+        elif validation_result.status == 'error':
+             logger.error(f"Validation agent run failed: {validation_result.error_message}")
+             raise RuntimeError(f"Validation agent failed: {validation_result.error_message}")
+        else:
+            logger.warning(f"validation_result does not have expected structure or is empty: {validation_result}")
+
+        best_thought_idx = validation_data.get('best_thought_index', 0)
+        final_answer = validation_data.get('final_answer', '')
+
+        best_thought = ""
+        if thoughts and 0 <= best_thought_idx < len(thoughts):
+             best_thought = thoughts[best_thought_idx]
+        elif thoughts:
+             logger.warning(f"Best thought index {best_thought_idx} invalid for {len(thoughts)} thoughts. Using index 0.")
+             best_thought = thoughts[0]
+        else:
+             logger.warning("No thoughts available to determine best thought.")
+
+        logger.info(f"Validation completed, selected best thought index: {best_thought_idx}")
 
         result = {
             "problem": module_run.inputs.problem,
