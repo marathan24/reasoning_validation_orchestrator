@@ -70,20 +70,16 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Agent deployment details: {self.agent_deployments[1]}")
             raise
 
+    def sanitize_problem(self, problem):
+        problem = problem.rstrip(',')
+        return json.dumps(problem)[1:-1]
+
     def sanitize_thought(self, thought):
         thought = re.sub(r'\\[\(\)\[\]]', '', thought)
         thought = re.sub(r'\\(frac|times|cdot|S_n)', '', thought)
         thought = re.sub(r'\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', thought)
-
-        thought = thought.replace('\\', '\\\\') 
-        thought = thought.replace('"', '\\"')   
-        thought = thought.replace('\n', '\\n')  
-        thought = thought.replace('\r', '\\r')  
-        thought = thought.replace('\t', '\\t')  
         
-        thought = thought.replace("'", "\\'")   
-        
-        return thought
+        return json.dumps(thought)[1:-1]
 
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
         run_id = str(uuid.uuid4())
@@ -143,9 +139,18 @@ class ReasoningValidationOrchestrator:
 
         validation_input = {
             "func_name": "validate",
-            "problem": module_run.inputs.problem,
+            "problem": self.sanitize_problem(module_run.inputs.problem),
             "thoughts": simplified_thoughts
         }
+
+        try:
+            json_str = json.dumps(validation_input)
+            logger.debug(f"Validation input JSON: {json_str[:200]}...")
+            logger.debug("Validation input serializes properly to JSON")
+        except Exception as e:
+            logger.error(f"JSON serialization error: {e}")
+            logger.error(f"Problem text: {module_run.inputs.problem}")
+            raise ValueError(f"Failed to prepare validation input: {e}")
 
         validation_run_input = AgentRunInput(
             consumer_id=module_run.consumer_id,
