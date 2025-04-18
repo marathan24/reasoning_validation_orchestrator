@@ -75,12 +75,14 @@ class ReasoningValidationOrchestrator:
         thought = re.sub(r'\\(frac|times|cdot|S_n)', '', thought)
         thought = re.sub(r'\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', thought)
 
-        thought = thought.replace('\\', '\\\\')
-        thought = thought.replace('"', '\\"')
-        thought = thought.replace('\n', '\\n')
-        thought = thought.replace('\r', '\\r')
-        thought = thought.replace('\t', '\\t')
-
+        thought = thought.replace('\\', '\\\\') 
+        thought = thought.replace('"', '\\"')   
+        thought = thought.replace('\n', '\\n')  
+        thought = thought.replace('\r', '\\r')  
+        thought = thought.replace('\t', '\\t')  
+        
+        thought = thought.replace("'", "\\'")   
+        
         return thought
 
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
