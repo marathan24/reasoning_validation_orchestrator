@@ -69,14 +69,6 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Failed to initialize validation agent: {e}")
             logger.error(f"Agent deployment details: {self.agent_deployments[1]}")
             raise
-
-    def sanitize_text(self, text):
-        """Clean up text to prevent any JSON parsing issues"""
-        # Remove trailing commas and specific problematic patterns
-        text = text.rstrip(',')
-        # Replace any apostrophes and quotes with simple versions
-        text = text.replace("'", "'").replace('"', '"')
-        return text
         
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
         run_id = str(uuid.uuid4())
@@ -129,13 +121,14 @@ class ReasoningValidationOrchestrator:
                  logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
+        # JSON-encode each thought to properly escape special characters
         sanitized_thoughts = []
         for thought in thoughts:
-            sanitized_thought = self.sanitize_text(thought)
+            sanitized_thought = json.dumps(thought)
             sanitized_thoughts.append(sanitized_thought)
 
-        sanitized_problem = self.sanitize_text(module_run.inputs.problem)
-
+        # JSON-encode the problem as well
+        sanitized_problem = json.dumps(module_run.inputs.problem)
       
         validation_input = {
             "func_name": "validate",
