@@ -144,6 +144,7 @@ class ReasoningValidationOrchestrator:
         
         logger.info(f"Prepared {len(clean_thoughts)} thoughts for validation")
 
+        # Fix: Use a dictionary for inputs directly instead of JSON serializing it
         validation_input = {
             "func_name": "validate",
             "problem": problem,
@@ -151,12 +152,17 @@ class ReasoningValidationOrchestrator:
         }
 
         try:
+            # Create the run input structure directly without any JSON serialization
             validation_run_input = AgentRunInput(
                 consumer_id=module_run.consumer_id,
-                inputs=validation_input,
+                inputs=validation_input,  # Pass the dictionary directly
                 deployment=self.agent_deployments[1],
                 signature=sign_consumer_id(module_run.consumer_id, private_key)
             )
+            
+            # Log the input format for debugging purposes
+            logger.debug(f"Validation input format: {type(validation_run_input.inputs)}")
+            logger.debug(f"Validation thoughts type: {type(validation_run_input.inputs.get('thoughts', []))}")
             
             validation_result = await self.validation_agent.run(validation_run_input)
             
