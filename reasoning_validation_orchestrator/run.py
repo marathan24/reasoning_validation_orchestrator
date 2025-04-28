@@ -104,6 +104,7 @@ class ReasoningValidationOrchestrator:
                     reasoning_data = json.loads(reasoning_result.results[0])
                     thoughts = reasoning_data.get('thoughts', [])
                     logger.info(f"Successfully extracted {len(thoughts)} thoughts from reasoning_result")
+                    logger.debug(f"Raw thoughts: {thoughts}")
                 except (json.JSONDecodeError, IndexError, TypeError) as e:
                     logger.error(f"Failed to extract thoughts from results: {e}")
                     logger.error(f"Results: {reasoning_result.results}")
@@ -127,18 +128,26 @@ class ReasoningValidationOrchestrator:
             # Remove trailing commas, extra whitespace and other problematic characters
             problem = problem.rstrip(',').strip()
 
-        # Format thoughts so they can be properly serialized
-        formatted_thoughts = []
+        # The validation agent expects each thought to be a simple string in the array
+        # Make sure thoughts are in the right format
+        clean_thoughts = []
         for thought in thoughts:
-            if isinstance(thought, str):
-                # Clean up strings that might have problematic characters
-                thought = thought.replace('\\"', '"').strip()
-            formatted_thoughts.append(thought)
+            if isinstance(thought, dict) and 'content' in thought:
+                # Handle case where thoughts might be in object format
+                clean_thoughts.append(thought['content'])
+            elif isinstance(thought, str):
+                # Normal case - just use the string directly
+                clean_thoughts.append(thought)
+            else:
+                # Try to convert to string
+                clean_thoughts.append(str(thought))
+        
+        logger.info(f"Prepared {len(clean_thoughts)} thoughts for validation")
 
         validation_input = {
             "func_name": "validate",
             "problem": problem,
-            "thoughts": formatted_thoughts
+            "thoughts": clean_thoughts
         }
 
         try:
