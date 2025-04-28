@@ -121,10 +121,24 @@ class ReasoningValidationOrchestrator:
                  logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
+        # Clean any potentially problematic characters from the problem string
+        problem = module_run.inputs.problem
+        if isinstance(problem, str):
+            # Remove trailing commas, extra whitespace and other problematic characters
+            problem = problem.rstrip(',').strip()
+
+        # Format thoughts so they can be properly serialized
+        formatted_thoughts = []
+        for thought in thoughts:
+            if isinstance(thought, str):
+                # Clean up strings that might have problematic characters
+                thought = thought.replace('\\"', '"').strip()
+            formatted_thoughts.append(thought)
+
         validation_input = {
             "func_name": "validate",
-            "problem": module_run.inputs.problem,
-            "thoughts": thoughts
+            "problem": problem,
+            "thoughts": formatted_thoughts
         }
 
         try:
