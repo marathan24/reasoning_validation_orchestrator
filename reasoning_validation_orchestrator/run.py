@@ -125,11 +125,12 @@ class ReasoningValidationOrchestrator:
         sanitized_thoughts = []
         for thought in thoughts:
             sanitized_thought = json.dumps(thought)
+            sanitized_thought = f'''{sanitized_thought}'''
             sanitized_thoughts.append(sanitized_thought)
 
         # JSON-encode the problem as well
         sanitized_problem = json.dumps(module_run.inputs.problem)
-      
+        sanitized_problem = f'''{sanitized_problem}'''
         validation_input = {
             "func_name": "validate",
             "problem": sanitized_problem,
