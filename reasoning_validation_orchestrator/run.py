@@ -152,7 +152,7 @@ class ReasoningValidationOrchestrator:
         }
 
         try:
-            logger.debug(f"Validation input observed : {validation_input}")
+            logger.info(f"Validation input observed : {validation_input}")
             # Create the run input structure directly without any JSON serialization
             validation_run_input = AgentRunInput(
                 consumer_id=module_run.consumer_id,
