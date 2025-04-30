@@ -6,6 +6,7 @@ import traceback
 import uuid
 import re
 from dotenv import load_dotenv
+from typing import Dict, List, Any, Optional
 
 from naptha_sdk.modules.agent import Agent
 from naptha_sdk.schemas import OrchestratorRunInput, AgentRunInput, AgentDeployment
@@ -69,18 +70,19 @@ class ReasoningValidationOrchestrator:
             logger.error(f"Failed to initialize validation agent: {e}")
             logger.error(f"Agent deployment details: {self.agent_deployments[1]}")
             raise
-
+        
     async def run(self, module_run: OrchestratorRunInput, *args, **kwargs):
         run_id = str(uuid.uuid4())
         private_key_path = os.getenv("PRIVATE_KEY_FULL_PATH")
         if not private_key_path:
-            logger.warning("PRIVATE_KEY_FULL_PATH environment variable not set. Trying PRIVATE_KEY.")
-            private_key_path = os.getenv("PRIVATE_KEY")
-            if not private_key_path:
-                raise ValueError("Private key path environment variable (PRIVATE_KEY_FULL_PATH or PRIVATE_KEY) not set.")
+             logger.warning("PRIVATE_KEY_FULL_PATH environment variable not set. Trying PRIVATE_KEY.")
+             private_key_path = os.getenv("PRIVATE_KEY")
+             if not private_key_path:
+                  raise ValueError("Private key path environment variable (PRIVATE_KEY_FULL_PATH or PRIVATE_KEY) not set.")
 
         private_key = get_private_key_from_pem(private_key_path)
 
+        # Step 1: Run the reasoning agent
         reasoning_input = {
             "func_name": "reason",
             "problem": module_run.inputs.problem,
@@ -109,8 +111,8 @@ class ReasoningValidationOrchestrator:
                     logger.error(f"Failed to extract thoughts from results: {e}")
                     logger.error(f"Results: {reasoning_result.results}")
             elif reasoning_result.status == 'error':
-                logger.error(f"Reasoning agent run failed: {reasoning_result.error_message}")
-                raise RuntimeError(f"Reasoning agent failed: {reasoning_result.error_message}")
+                 logger.error(f"Reasoning agent run failed: {reasoning_result.error_message}")
+                 raise RuntimeError(f"Reasoning agent failed: {reasoning_result.error_message}")
             else:
                 logger.warning(f"reasoning_result does not have expected structure or is empty: {reasoning_result}")
 
@@ -119,52 +121,64 @@ class ReasoningValidationOrchestrator:
         except Exception as e:
             logger.error(f"Error in reasoning step: {e}")
             if not isinstance(e, RuntimeError):
-                logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
+                 logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
             raise e
 
+        # Clean any potentially problematic characters from the problem string
         problem = module_run.inputs.problem
         if isinstance(problem, str):
+            # Remove trailing commas, extra whitespace and other problematic characters
             problem = problem.rstrip(',').strip()
 
+        # The validation agent expects each thought to be a simple string in the array
+        # Make sure thoughts are in the right format
         clean_thoughts = []
         for thought in thoughts:
             if isinstance(thought, dict) and 'content' in thought:
+                # Handle case where thoughts might be in object format
                 clean_thoughts.append(thought['content'])
             elif isinstance(thought, str):
+                # Normal case - just use the string directly
                 clean_thoughts.append(thought)
             else:
+                # Try to convert to string
                 clean_thoughts.append(str(thought))
-
+        
         logger.info(f"Prepared {len(clean_thoughts)} thoughts for validation")
 
-        # Create a proper Python dictionary for validation input
-        validation_input = {
-            "func_name": "validate",
-            "problem": problem, 
-            "thoughts": clean_thoughts
-        }
+        # Step 2: Run the validation agent
+        # Define a class that will match the expected input format for validation
+        class ValidationInput:
+            def __init__(self, func_name: str, problem: str, thoughts: List[str]):
+                self.func_name = func_name
+                self.problem = problem
+                self.thoughts = thoughts
+            
+            def dict(self):
+                return {
+                    "func_name": self.func_name,
+                    "problem": self.problem,
+                    "thoughts": self.thoughts
+                }
         
-        # Create a direct input class instance that doesn't need to be json.loads'd
-        class DirectInput:
-            def __init__(self, **kwargs):
-                for key, value in kwargs.items():
-                    setattr(self, key, value)
-                    
-        # Create input object directly with the validation params
-        direct_input = DirectInput(**validation_input)
+        # Create the validation input
+        validation_input_obj = ValidationInput(
+            func_name="validate",
+            problem=problem,
+            thoughts=clean_thoughts
+        )
         
         try:
-            logger.info(f"Running validation with input: {direct_input}")
-            # Pass the direct input object instead of a dictionary
+            # Create the agent run input with our ValidationInput object
             validation_run_input = AgentRunInput(
                 consumer_id=module_run.consumer_id,
-                inputs=direct_input,
+                inputs=validation_input_obj.dict(),  # Use the dict method to get a proper dictionary
                 deployment=self.agent_deployments[1],
                 signature=sign_consumer_id(module_run.consumer_id, private_key)
             )
-
+            
             validation_result = await self.validation_agent.run(validation_run_input)
-
+            
         except Exception as e:
             logger.error(f"Error in validation step: {e}")
             logger.error(f"Full traceback:\n{''.join(traceback.format_tb(e.__traceback__))}")
@@ -183,8 +197,8 @@ class ReasoningValidationOrchestrator:
                 logger.error(f"Failed to extract data from validation results: {e}")
                 logger.error(f"Results: {validation_result.results}")
         elif validation_result.status == 'error':
-            logger.error(f"Validation agent run failed: {validation_result.error_message}")
-            raise RuntimeError(f"Validation agent failed: {validation_result.error_message}")
+             logger.error(f"Validation agent run failed: {validation_result.error_message}")
+             raise RuntimeError(f"Validation agent failed: {validation_result.error_message}")
         else:
             logger.warning(f"validation_result does not have expected structure or is empty: {validation_result}")
 
@@ -193,12 +207,12 @@ class ReasoningValidationOrchestrator:
 
         best_thought = ""
         if thoughts and 0 <= best_thought_idx < len(thoughts):
-            best_thought = thoughts[best_thought_idx]
+             best_thought = thoughts[best_thought_idx]
         elif thoughts:
-            logger.warning(f"Best thought index {best_thought_idx} invalid for {len(thoughts)} thoughts. Using index 0.")
-            best_thought = thoughts[0]
+             logger.warning(f"Best thought index {best_thought_idx} invalid for {len(thoughts)} thoughts. Using index 0.")
+             best_thought = thoughts[0]
         else:
-            logger.warning("No thoughts available to determine best thought.")
+             logger.warning("No thoughts available to determine best thought.")
 
         logger.info(f"Validation completed, selected best thought index: {best_thought_idx}")
 
@@ -216,8 +230,8 @@ async def run(module_run: dict, *args, **kwargs):
     try:
         module_run_obj.inputs = InputSchema(**module_run_obj.inputs)
     except Exception as e:
-        logger.error(f"Failed to parse orchestrator inputs against InputSchema: {e}")
-        raise ValueError(f"Invalid input format: {e}")
+         logger.error(f"Failed to parse orchestrator inputs against InputSchema: {e}")
+         raise ValueError(f"Invalid input format: {e}")
 
     orchestrator = ReasoningValidationOrchestrator()
     await orchestrator.create(module_run_obj.deployment, *args, **kwargs)
