@@ -74,9 +74,16 @@ class ReasoningValidationOrchestrator(Orchestrator):
         agent = Agent()
         await agent.create(deployment=agent_deployment)
         
+        # Ensure inputs are in the format expected by the agent
+        # Convert Pydantic model to dict if needed
+        if hasattr(inputs, 'model_dump'):
+            inputs_data = inputs.model_dump()
+        else:
+            inputs_data = inputs
+            
         agent_run_input = AgentRunInput(
             consumer_id=consumer_id,
-            inputs=inputs,  # Pass inputs directly without conversion
+            inputs=inputs_data,  # Use dictionary representation
             deployment=agent_deployment,
             signature=sign_consumer_id(consumer_id, self.private_key)
         )
@@ -150,6 +157,9 @@ class ReasoningValidationOrchestrator(Orchestrator):
                 problem=problem,
                 thoughts=clean_thoughts
             )
+            
+            # Debug log to check what's being sent to the validation agent
+            logger.info(f"Validation input: {validation_input.model_dump()}")
             
             validation_result = await self.run_agent(
                 self.validation_deployment,
