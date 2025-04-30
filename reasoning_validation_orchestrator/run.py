@@ -4,7 +4,9 @@ import json
 import asyncio
 import traceback
 import uuid
+from typing import List, Optional
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 from naptha_sdk.modules.orchestrator import Orchestrator
 from naptha_sdk.modules.agent import Agent
@@ -13,6 +15,12 @@ from naptha_sdk.user import sign_consumer_id, get_private_key_from_pem
 from reasoning_validation_orchestrator.schemas import InputSchema
 
 logger = logging.getLogger(__name__)
+
+# Define Pydantic model specifically for validation agent input
+class ValidationInputModel(BaseModel):
+    func_name: str
+    problem: str
+    thoughts: List[str]
 
 class ReasoningValidationOrchestrator(Orchestrator):
     async def create(self, deployment, *args, **kwargs):
@@ -68,7 +76,7 @@ class ReasoningValidationOrchestrator(Orchestrator):
         
         agent_run_input = AgentRunInput(
             consumer_id=consumer_id,
-            inputs=inputs,
+            inputs=inputs,  # Pass inputs directly without conversion
             deployment=agent_deployment,
             signature=sign_consumer_id(consumer_id, self.private_key)
         )
@@ -103,15 +111,20 @@ class ReasoningValidationOrchestrator(Orchestrator):
         try:
             # Step 1: Run the reasoning agent to generate thoughts
             logger.info("Starting reasoning agent")
+            
+            # Clean the problem string - remove trailing commas or other problematic characters
+            problem = module_run.inputs.problem.rstrip(',').strip()
+            
+            # Keep the reasoning input as a dictionary (no change from original)
             reasoning_input = {
                 "func_name": "reason",
-                "problem": module_run.inputs.problem,
+                "problem": problem,
                 "num_thoughts": module_run.inputs.num_thoughts
             }
             
             reasoning_result = await self.run_agent(
                 self.reasoning_deployment,
-                reasoning_input,
+                reasoning_input,  # Dictionary input for reasoning agent
                 module_run.consumer_id
             )
             
@@ -119,7 +132,7 @@ class ReasoningValidationOrchestrator(Orchestrator):
             thoughts = reasoning_result.get('thoughts', [])
             logger.info(f"Reasoning completed with {len(thoughts)} thoughts")
             
-            # Clean the thoughts to ensure they are all strings
+            # Clean the thoughts to ensure they are all properly formatted strings
             clean_thoughts = []
             for thought in thoughts:
                 if isinstance(thought, dict) and 'content' in thought:
@@ -131,16 +144,16 @@ class ReasoningValidationOrchestrator(Orchestrator):
             
             logger.info(f"Prepared {len(clean_thoughts)} thoughts for validation")
             
-            # Step 2: Run the validation agent to evaluate and select the best thought
-            validation_input = {
-                "func_name": "validate",
-                "problem": module_run.inputs.problem,
-                "thoughts": clean_thoughts
-            }
+            # Step 2: Use a Pydantic model for validation agent
+            validation_input = ValidationInputModel(
+                func_name="validate",
+                problem=problem,
+                thoughts=clean_thoughts
+            )
             
             validation_result = await self.run_agent(
                 self.validation_deployment,
-                validation_input,
+                validation_input,  # Pydantic model for validation agent
                 module_run.consumer_id
             )
             
@@ -162,7 +175,7 @@ class ReasoningValidationOrchestrator(Orchestrator):
             # Return the final result
             return {
                 "status": "success",
-                "problem": module_run.inputs.problem,
+                "problem": problem,
                 "reasoning_thoughts": thoughts,
                 "validation_result": validation_result,
                 "final_answer": final_answer,
